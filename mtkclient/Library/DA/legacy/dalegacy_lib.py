@@ -349,7 +349,7 @@ class DALegacy(metaclass=LogBase):
                             lendram = len(self.daconfig.emi)
                             if hwcode != 0x8127:
                                 self.usbwrite(pack(">I", lendram))
-                        elif self.daconfig.emiver in [0x0B]:
+                        elif self.daconfig.emiver in [0x0A, 0x0B]:
                             info = self.usbread(0x10)  # 0x000000BC
                             self.info(f"RAM-Info: {hexlify(info).decode('utf-8')}")
                             dramlength = unpack(">I", self.usbread(0x4))[0]
@@ -727,6 +727,10 @@ class DALegacy(metaclass=LogBase):
                                     if ack == b"Z":
                                         self.usbwrite(b"Z")
                                         self.cmd_nwdm_info()
+                                    else:
+                                        print("Didn't receive 2523 read flash ack")
+                                        sys.stdout.flush()
+                                        return False
                                 else:
                                     print("Bad chip setup")
                                     sys.stdout.flush()
@@ -879,15 +883,15 @@ class DALegacy(metaclass=LogBase):
     def upload_da(self):
         self.info("Uploading legacy da...")
         if self.upload_da1():
-            self.info(self.daconfig.legacy_storage.flashconfig)
+            self.info(repr(self.daconfig.legacy_storage.flashconfig))
             if self.daconfig.storage.flashtype == "emmc":
-                self.info(self.daconfig.legacy_storage.emmc)
+                self.info(repr(self.daconfig.legacy_storage.emmc))
             elif self.daconfig.storage.flashtype == "nand":
-                self.info(self.daconfig.legacy_storage.nand)
+                self.info(repr(self.daconfig.legacy_storage.nand))
             elif self.daconfig.storage.flashtype == "nor":
-                self.info(self.daconfig.legacy_storage.nor)
+                self.info(repr(self.daconfig.legacy_storage.nor))
             elif self.daconfig.storage.flashtype == "sdc":
-                self.info(self.daconfig.legacy_storage.sdc)
+                self.info(repr(self.daconfig.legacy_storage.sdc))
             return True
         return False
 
@@ -1014,10 +1018,13 @@ class DALegacy(metaclass=LogBase):
             count = min(0x100000, length - offset)
             if fh:
                 data = bytearray(fh.read(count))
-                if len(data) < count:
-                    data.extend(b"\x00" * fill)
             else:
                 data = wdata[offset:offset + count]
+            if len(data) < count:
+                data.extend(b"\x00" * fill)
+            if len(data) % 512 != 0:
+                fill = 512 - (len(data) % 512)
+                data += fill*b"\x00"
             self.usbwrite(data)
             chksum = sum(data) & 0xFFFF
             self.usbwrite(pack(">H", chksum))
@@ -1141,7 +1148,7 @@ class DALegacy(metaclass=LogBase):
             if ack is not self.Rsp.ACK[0]:
                 self.usbwrite(b"\xA5")
                 res = unpack("<I", self.usbread(4))[0]
-                self.error(f"Error on sending emmc read command, response: {hex(ack)}, status: {hex(res)}")
+                self.error(f"Error on sending emmc read flash command, response: {hex(ack)}, status: {hex(res)}")
                 exit(1)
             self.daconfig.readsize = self.daconfig.storage.flashsize
         elif self.daconfig.storage.flashtype == "nand":
@@ -1183,7 +1190,7 @@ class DALegacy(metaclass=LogBase):
             if ack is not self.Rsp.ACK[0]:
                 self.usbwrite(b"\xA5")
                 res = unpack("<I", self.usbread(4))[0]
-                self.error(f"Error on sending emmc read command, response: {hex(ack)}, status: {hex(res)}")
+                self.error(f"Error on sending nor readflash command, response: {hex(ack)}, status: {hex(res)}")
                 exit(1)
             self.daconfig.readsize = self.daconfig.storage.flashsize
         if filename != "":
@@ -1229,22 +1236,21 @@ class DALegacy(metaclass=LogBase):
 
 
 if __name__ == "__main__":
-    """
     from mtkclient.Library.mtk_class import Mtk
     from mtkclient.config.mtk_config import MtkConfig
 
     config = MtkConfig(logging.INFO)
-    config.init_hwcode(0x6592)
-    config.hwver = 0xca00
+    config.init_hwcode(0x6575)
+    config.hwver = 0x0
     config.swver = 0
     # config.loader = open("../../../../DA_Loader/V5/htc/MTK_AllInOne_DA_SWSEC_HTC.9286c98a.bin","rb").read()
     mtk = Mtk(config=config, loglevel=logging.INFO,
               serialportname=None)
     from mtkclient.Library.DA.daconfig import DAconfig
-
     daconfig = DAconfig(mtk=mtk, loader=mtk.config.loader,
                         preloader=mtk.config.preloader, loglevel=logging.INFO)
-    daconfig.parse_da_loader("../../../../DA_Loader/V5/htc/MTK_AllInOne_DA_SWSEC_HTC.9286c98a.bin", daconfig.dasetup)
+    daconfig.setup()
+    """daconfig.parse_da_loader("../../../../DA_Loader/V5/htc/MTK_AllInOne_DA_SWSEC_HTC.9286c98a.bin", daconfig.dasetup)
     mtk.daloader.daconfig.setup()
     from mtkclient.Library.DA.legacy.extension.legacy import LegacyExt
 

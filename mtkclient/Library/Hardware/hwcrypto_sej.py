@@ -95,7 +95,7 @@ regval = {
     "HACC_SECINIT1": 0x0084,
     "HACC_SECINIT2": 0x0088,
     "HACC_MKJ": 0x00a0,
-    "HACC_UNK": 0x00bc
+    "HACC_SECINIT0_new": 0x00bc
 }
 
 
@@ -653,11 +653,11 @@ class Sej(metaclass=LogBase):
                     self.reg.HACC_ACFG3 = iv[3]
                 return 0
             if sejparam & 8 != 0:
-                self.reg.HACC_UNK &= 0xFFFFFFFD
+                self.reg.HACC_SECINIT0_new &= 0xFFFFFFFD
             else:
-                self.reg.HACC_UNK |= 2
+                self.reg.HACC_SECINIT0_new |= 2
             if sejparam & 4 == 0:
-                self.reg.HACC_UNK |= 1
+                self.reg.HACC_SECINIT0_new |= 1
                 if m_sst_type & 2 == 0:
                     self.reg.HACC_ACONK = self.HACC_AES_BK2C
                 if attr & 2 != 0:
@@ -671,7 +671,7 @@ class Sej(metaclass=LogBase):
             current_clock = self.get_world_clock_value()
             while True:
                 if self.reg.HACC_ACON2 < 0:
-                    self.reg.HACC_UNK &= 0xFFFFFFFE
+                    self.reg.HACC_SECINIT0_new &= 0xFFFFFFFE
                 if self.check_timeout(current_clock, 200):
                     return -1
         return 0
@@ -798,6 +798,11 @@ class Sej(metaclass=LogBase):
         self.reg.HACC_AKEY7 = 0
 
     def SEJ_V3_Init(self, ben=True, iv=None, legacy=False):
+        # 0x335 = MT6737M/MT6735G
+        # 0x321 = MT6735/T,MT8735A
+        # 0x337 = MT6753
+        if self.hwcode in [0x6795, 0x335, 0x321, 0x337, 0x279, 0x1375]:
+            legacy = False
         acon_setting = self.HACC_AES_CHG_BO_OFF | self.HACC_AES_128
         if iv is not None:
             acon_setting |= self.HACC_AES_CBC
@@ -821,10 +826,11 @@ class Sej(metaclass=LogBase):
 
         # init ACONK, bind HUID/HUK to HACC, this may differ
         # enable R2K, so that output data is feedback to key by HACC internal algorithm
-        self.reg.HACC_ACONK = self.HACC_AES_BK2C | self.HACC_AES_R2K  # 0x0C
+        self.reg.HACC_ACONK = self.HACC_AES_BK2C
+        self.reg.HACC_ACONK |= self.HACC_AES_R2K  # 0x110
 
         # clear HACC_ASRC/HACC_ACFG/HACC_AOUT
-        self.reg.HACC_ACON2 = self.HACC_AES_CLR  # 0x08
+        self.reg.HACC_ACON2 = self.HACC_AES_CLR  # 0x2
 
         self.reg.HACC_ACFG0 = iv[0]  # g_AC_CFG
         self.reg.HACC_ACFG1 = iv[1]
@@ -832,7 +838,7 @@ class Sej(metaclass=LogBase):
         self.reg.HACC_ACFG3 = iv[3]
 
         if legacy:
-            self.reg.HACC_UNK |= 2
+            self.reg.HACC_SECINIT0_new |= 2
             # clear HACC_ASRC/HACC_ACFG/HACC_AOUT
             self.reg.HACC_ACON2 |= 0x40000000
             i = 0
@@ -842,12 +848,12 @@ class Sej(metaclass=LogBase):
                 i += 1
             if i == 20:
                 self.error("SEJ Legacy Hardware seems not to be configured correctly. Results may be wrong.")
-            self.reg.HACC_UNK &= 0xFFFFFFFE
+            self.reg.HACC_SECINIT0_new &= 0xFFFFFFFE
             self.reg.HACC_ACONK = self.HACC_AES_BK2C
             self.reg.HACC_ACON = acon_setting
         else:
             # The reg below needed for mtee ?
-            self.reg.HACC_UNK = 1
+            self.reg.HACC_SECINIT0_new = 1
 
             # encrypt fix pattern 3 rounds to generate a pattern from HUID/HUK
             for i in range(0, 3):
@@ -856,7 +862,7 @@ class Sej(metaclass=LogBase):
                 self.reg.HACC_ASRC1 = self.g_CFG_RANDOM_PATTERN[pos + 1]
                 self.reg.HACC_ASRC2 = self.g_CFG_RANDOM_PATTERN[pos + 2]
                 self.reg.HACC_ASRC3 = self.g_CFG_RANDOM_PATTERN[pos + 3]
-                self.reg.HACC_ACON2 = self.HACC_AES_START
+                self.reg.HACC_ACON2 = self.HACC_AES_START # 0x1
                 i = 0
                 while i < 20:
                     if self.reg.HACC_ACON2 & self.HACC_AES_RDY != 0:
@@ -879,11 +885,11 @@ class Sej(metaclass=LogBase):
         if iv is None:
             iv = self.g_HACC_CFG_1
         self.tz_pre_init()
-        self.info("HACC init")
+        self.info("AES128 CBC - HACC init")
         self.SEJ_V3_Init(ben=encrypt, iv=iv, legacy=legacy)
-        self.info("HACC run")
+        self.info("AES128 CBC - HACC run")
         buf2 = self.HACC_V3_Run(buf)
-        self.info("HACC terminate")
+        self.info("AES128 CBC - HACC terminate")
         self.sej_terminate()
         return buf2
 
@@ -976,11 +982,11 @@ class Sej(metaclass=LogBase):
     def sej_sec_cfg_hw(self, data, encrypt=True, noxor=False):
         if encrypt and not noxor:
             data = self.xor_data(bytearray(data))
-        self.info("HACC init")
+        self.info("SecCfg Hw - HACC init")
         self.SEJ_V3_Init(ben=encrypt, iv=self.g_HACC_CFG_1, legacy=True)
-        self.info("HACC run")
+        self.info("SecCfg Hw - HACC run")
         dec = self.HACC_V3_Run(data)
-        self.info("HACC terminate")
+        self.info("SecCfg Hw - HACC terminate")
         self.sej_terminate()
         if not encrypt and not noxor:
             dec = self.xor_data(dec)
@@ -1005,19 +1011,19 @@ class Sej(metaclass=LogBase):
         dec = None
         if user == 0:
             iv = self.g_HACC_CFG_1
-            self.info("HACC init")
+            self.info("SP_HAcc0 - HACC init")
             self.SEJ_V3_Init(ben=b_en, iv=iv)
-            self.info("HACC run")
+            self.info("SP_HAcc0 - HACC run")
             dec = self.HACC_V3_Run(buf)
-            self.info("HACC terminate")
+            self.info("SP_HAcc0 - HACC terminate")
             self.sej_terminate()
         elif user == 1:
             iv = self.g_HACC_CFG_2
-            self.info("HACC init")
+            self.info("SP_HAcc1 - HACC init")
             self.SEJ_V3_Init(ben=b_en, iv=iv)
-            self.info("HACC run")
+            self.info("SP_HAcc1 - HACC run")
             dec = self.HACC_V3_Run(buf)
-            self.info("HACC terminate")
+            self.info("SP_HAcc1 - HACC terminate")
             self.sej_terminate()
         elif user == 2:
             self.sej_set_key(key=2, flag=32)
@@ -1025,11 +1031,11 @@ class Sej(metaclass=LogBase):
             dec = self.sej_do_aes(encrypt=aes_type, iv=iv, data=buf, length=len(buf))
         elif user == 3:
             iv = self.g_HACC_CFG_3
-            self.info("HACC init")
+            self.info("SP_HAcc3 - HACC init")
             self.SEJ_V3_Init(ben=b_en, iv=iv)
-            self.info("HACC run")
+            self.info("SP_HAcc3 - HACC run")
             dec = self.HACC_V3_Run(buf)
-            self.info("HACC terminate")
+            self.info("SP_HAcc3 - HACC terminate")
             self.sej_terminate()
         return dec
 
@@ -1054,11 +1060,11 @@ class Sej(metaclass=LogBase):
     def generate_mtee_hw(self, otp=None):
         if otp is not None:
             self.sej_set_otp(otp)
-        self.info("HACC init")
+        self.info("MTee - HACC init")
         self.SEJ_V3_Init(ben=True, iv=self.g_HACC_CFG_MTEE)
-        self.info("HACC run")
+        self.info("MTee - HACC run")
         dec = self.HACC_V3_Run(bytes.fromhex("7777772E6D6564696174656B2E636F6D30313233343536373839414243444546"))
-        self.info("HACC terminate")
+        self.info("MTee - HACC terminate")
         self.sej_terminate()
         return dec
 
@@ -1079,14 +1085,14 @@ class Sej(metaclass=LogBase):
         seed = (CustomSeed[2] << 16) | (CustomSeed[1] << 8) | CustomSeed[0] | (CustomSeed[3] << 24)
         iv = [seed, (~seed) & 0xFFFFFFFF, (((seed >> 16) | (seed << 16)) & 0xFFFFFFFF),
               (~((seed >> 16) | (seed << 16)) & 0xFFFFFFFF)]
-        self.info("HACC init")
+        self.info("Meta - HACC init")
         if encrypt and not noxor:
             data = self.xor_data(bytearray(data))
-        self.info("HACC init")
+        self.info("Meta - HACC init")
         self.SEJ_V3_Init(ben=encrypt, iv=iv, legacy=legacy)
-        self.info("HACC run")
+        self.info("Meta - HACC run")
         dec = self.HACC_V3_Run(data)
-        self.info("HACC terminate")
+        self.info("Meta - HACC terminate")
         self.sej_terminate()
         if not encrypt and not noxor:
             dec = self.xor_data(dec)

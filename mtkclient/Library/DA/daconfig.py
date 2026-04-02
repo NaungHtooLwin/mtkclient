@@ -89,6 +89,7 @@ class DAconfig(metaclass=LogBase):
         self.legacy_storage = Legacy_Storage(mtk, self, loglevel)
         self.reconnect = self.config.reconnect
         self.uartloglevel = self.config.uartloglevel
+        self.logchannel = self.config.logchannel
         self.sparesize = 0
         self.readsize = 0
         self.pagesize = 512
@@ -208,8 +209,8 @@ class DAconfig(metaclass=LogBase):
         if dacode in self.dasetup:
             loaders = self.dasetup[dacode]
             for loader in loaders:
-                if loader.hw_version <= self.config.hwver:
-                    if loader.sw_version <= self.config.swver:
+                if loader.hw_version <= self.config.hwver or self.config.hwver == 0:
+                    if loader.sw_version <= self.config.swver or self.config.swver == 0:
                         if self.da_loader is None:
                             if loader.v6:
                                 self.config.chipconfig.damode = DAmodes.XML

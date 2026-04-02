@@ -102,8 +102,8 @@ def convert_size(size_bytes):
 
 class asyncThread(QThread):
     sendToLogSignal = Signal(str)
-    sendUpdateSignal = Signal()
-    sendToProgressSignal = Signal(int)
+    sendUpdateSignal = Signal(dict)
+    sendToProgressSignal = Signal(object)
     update_status_text = Signal(str)
 
     def __init__(self, parent, n, function, parameters):
@@ -113,8 +113,13 @@ class asyncThread(QThread):
         self.function = function
 
     def run(self):
-        self.function(self, self.parameters)
-
+        try:
+            self.function(self, self.parameters)
+        except Exception as e:
+            self.sendToLogSignal.emit(f"Thread error: {str(e)}")
+        finally:
+            # Ensure proper cleanup
+            pass
 
 class FDialog:
     def __init__(self, parent):

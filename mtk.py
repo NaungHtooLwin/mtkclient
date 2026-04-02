@@ -9,7 +9,7 @@ import sys
 
 from mtkclient.Library.mtk_main import Main, metamodes
 
-INFO = "MTK Flash/Exploit Client V2.1.3 (c) B.Kerler 2018-2026"
+INFO = "MTK Flash/Exploit Client V2.1.4 (c) B.Kerler 2018-2026"
 
 CMDS_HELP = {
     "printgpt": "Print GPT Table information",
@@ -60,6 +60,7 @@ def add_connection_group(parser):
     g.add_argument('--noreconnect', action='store_true')
     g.add_argument('--stock', action='store_true', help='use stock da')
     g.add_argument('--uartloglevel', help='Set uart log level (0=Trace, 2=Normal)')
+    g.add_argument('--logchannel', help='Set log channel ("UART","USB", "BOTH")', default="UART")
     g.add_argument('--loglevel', help='Set log level (0=Trace, 2=Normal)')
     g.add_argument('--write_preloader_to_file', action='store_true', help='Dump preloader to file')
     g.add_argument('--generatekeys', action='store_true', help='Derive HW keys')
@@ -237,7 +238,10 @@ def main():
 
     plstage=subparsers.add_parser("plstage", help=CMDS_HELP["plstage"], parents=[base])
     plstage.add_argument('--startpartition', help='Option for plstage - Boot to (lk, tee1)')
+    plstage.add_argument('--offset', help='Address to read from memory')
+    plstage.add_argument('--length', help='Bytes to read from memory')
     plstage.add_argument('--pl', help='pl stage filename (optional)')
+    plstage.add_argument("--metamode", type=str, help="metamode to use [off,usb,uart]")
 
 
     # DA subcommands

@@ -67,9 +67,18 @@ class SecCfgV4(metaclass=LogBase):
         if _hash == dec_hash:
             self.hwtype = "SW"
         else:
+            # for unlock, we enforce sw for easier debugging
             self.custom_sej_hw = None
             if self.custom_sej_hw is not None:
                 # ddata = self.protect(self.hash)
+                """
+                test=self.hwc.sej.crypto_meta_hw(m_sst_type=0x64,
+                                                 otp=self.mtk.config.get_otp(),
+                                                 unlock=True,
+                                                 data=self.hash,
+                                                 encrypt=False,
+                                                 samsung=False)
+                """
                 status, dec_hash = self.custom_sej_hw(encrypt=False,
                                                       data=self.hash,
                                                       cryptmode=sej_cryptmode.UNLOCK,
@@ -94,7 +103,7 @@ class SecCfgV4(metaclass=LogBase):
                     if _hash == dec_hash:
                         self.hwtype = "HWXOR"
             else:
-                dec_hash = self.hwc.sej.sej_sec_cfg_hw_V3(self.hash, False)
+                dec_hash = self.hwc.sej.sej_sec_cfg_hw_V3(self.hash, False, legacy=False)
                 if _hash == dec_hash:
                     self.hwtype = "V3"
                 else:
@@ -251,6 +260,15 @@ class SecCfgV3(metaclass=LogBase):
             otp = 32 * b"\x00"
         _hwc.sej.sej_set_otp(otp)
 
+    def verify(self, data):
+        if len(data)>4:
+            if data[:4] in [b"IIII", b"CCCC", b"\x00\x00\x00\x00"]:
+                return 0
+        if len(data)>0x858:
+            if data[0x850:0x854] in [b"IIII", b"CCCC", b"\x00\x00\x00\x00"]:
+                return 0x850
+        return -1
+
     def parse(self, indata) -> bool:
         if indata[:0x10] != b"AND_SECCFG_v\x00\x00\x00\x00":
             return False
@@ -271,13 +289,13 @@ class SecCfgV3(metaclass=LogBase):
             self.error("Unknown V3 seccfg structure !")
             return False
         err = self.hwc.sej.sej_sec_cfg_sw(self.data, encrypt=False)
-        if err[:4] not in [b"IIII", b"CCCC", b"\x00\x00\x00\x00"]:
+        if self.verify(err)==-1:
             err = self.hwc.sej.sej_sec_cfg_hw_V3(self.data, encrypt=False)
-            if err[:4] not in [b"IIII", b"CCCC", b"\x00\x00\x00\x00"]:
+            if self.verify(err)==-1:
                 err = self.hwc.sej.sej_sec_cfg_hw(self.data, encrypt=False)
-                if err[:4] not in [b"IIII", b"CCCC", b"\x00\x00\x00\x00"]:
+                if self.verify(err)==-1:
                     err = self.hwc.sej.sej_sec_cfg_hw_V3(self.data, encrypt=False, legacy=True)
-                    if err[:4] not in [b"IIII", b"CCCC", b"\x00\x00\x00\x00"]:
+                    if self.verify(err)==-1:
                         self.error("Unknown V3 seccfg encryption !")
                         return False
                     else:
@@ -288,6 +306,11 @@ class SecCfgV3(metaclass=LogBase):
                 self.hwtype = "V2"
         else:
             self.hwtype = "SW"
+        self.hwoffset = self.verify(err)
+        if self.hwoffset == 0x850:
+            print("Please report this buffer to github issues for adding support:")
+            print(err.hex())
+            return False
         self.org_data = err
         ed = structhelper_io(BytesIO(bytearray(err)))
         self.imginfo = [ed.bytes(0x68) for _ in range(20)]
@@ -295,7 +318,7 @@ class SecCfgV3(metaclass=LogBase):
         self.seccfg_status = ed.dword()
         if self.seccfg_status not in [SeccfgStatus.SEC_CFG_COMPLETE_NUM, SeccfgStatus.SEC_CFG_INCOMPLETE_NUM]:
             return False
-        self.seccfg_attr = ed.dword()
+        self.seccfg_attr = ed.dword() # offset = 0x854
         if self.seccfg_attr not in [SeccfgAttr.ATTR_DEFAULT, SeccfgAttr.ATTR_UNLOCK, SeccfgAttr.ATTR_MP_DEFAULT,
                                     SeccfgAttr.ATTR_LOCK, SeccfgAttr.ATTR_CUSTOM, SeccfgAttr.ATTR_VERIFIED]:
             return False
@@ -364,7 +387,7 @@ class SecCfgV3(metaclass=LogBase):
 
 
 if __name__ == "__main__":
-    with open("seccfg.bin", "rb") as rf:
+    with open("seccfg_lock.bin", "rb") as rf:
         data = rf.read()
     from hwcrypto import HwCrypto, CryptoSetup
 

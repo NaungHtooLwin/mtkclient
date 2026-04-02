@@ -84,10 +84,14 @@ class DAXFlash(metaclass=LogBase):
 
     def ack(self, rstatus=True):
         try:
-            tmp = pack("<III", self.cmd.MAGIC, self.data_type.DT_PROTOCOL_FLOW, 4)
-            data = pack("<I", 0)
-            self.usbwrite(tmp)
-            self.usbwrite(data)
+            if self.mtk.config.chipconfig.dacode in [0x6781]:
+                stmp = pack("<IIII", self.cmd.MAGIC, self.data_type.DT_PROTOCOL_FLOW, 4, 0)
+                self.usbwrite(stmp)
+            else: # needed for 0x6750, 0x6762, 0x6785, 0x6761, 0x6771
+                stmp = pack("<III", self.cmd.MAGIC, self.data_type.DT_PROTOCOL_FLOW, 4)
+                data = pack("<I", 0)
+                self.usbwrite(stmp)
+                self.usbwrite(data)
             if rstatus:
                 status = self.status()
                 return status
@@ -178,6 +182,9 @@ class DAXFlash(metaclass=LogBase):
             if status == 0xc0020053:
                 # Anti roll back DA error
                 sys.exit(1)
+            elif status == 0xc0020004:
+                # DL forbidden error
+                sys.exit(1)
         return False
 
     def send_devctrl(self, cmd, param=None, status=None):
@@ -253,7 +260,7 @@ class DAXFlash(metaclass=LogBase):
                                 self.info("DRAM setup passed.")
                                 return True
                         except Exception as err:
-                            self.info(f"DRAM setup failed: {str(err)}")
+                            self.info(f"DRAM setup failed: {str(err)}. Use mtk.py with --preloader preloader.bin !")
                             return False
                 except Exception as err:
                     self.error(f"Error on sending emi: {str(err)}")
@@ -745,8 +752,7 @@ class DAXFlash(metaclass=LogBase):
                             rq.put(bytes(chunk_buffer))
                         else:
                             buffer.extend(chunk_buffer)
-                        stmp = pack("<IIII", self.cmd.MAGIC, self.data_type.DT_PROTOCOL_FLOW, 4, 0)
-                        self.usbwrite(stmp)
+                        self.ack(rstatus=False)
                         ld = len(chunk_buffer)
                         bytestoread -= ld
                         bytesread += ld
@@ -833,18 +839,19 @@ class DAXFlash(metaclass=LogBase):
             if os.path.exists(filename):
                 fsize = os.stat(filename).st_size
                 length = min(fsize, length)
-                if length % 512 != 0:
-                    fill = 512 - (length % 512)
-                    length += fill
                 fh = open(filename, "rb")
                 fh.seek(offset)
             else:
                 self.error(f"Filename doesn't exists: {filename}, aborting flash write.")
                 return False
+        if length % 512 != 0:
+            fill = 512 - (length % 512)
+            length += fill
         partinfo = self.daconfig.storage.get_storage(parttype, length)
         if not partinfo:
             return False
-        storage, parttype, length = partinfo
+        storage, parttype, plength = partinfo
+        length = min(length, plength)
         pg = progress(total=length, prefix="Write:", guiprogress=self.mtk.config.guiprogress)
         # self.send_devctrl(self.Cmd.START_DL_INFO)
         plen = self.get_packet_length()
@@ -862,6 +869,9 @@ class DAXFlash(metaclass=LogBase):
                             data.extend(b"\x00" * fill)
                     else:
                         data = wdata[pos:pos + dsize]
+                    if len(data) % 512 != 0:
+                        fill = 512 - (len(data) % 512)
+                        data += fill * b"\x00"
                     if display:
                         pg.update(len(data))
                     checksum = sum(data) & 0xFFFF
@@ -900,7 +910,12 @@ class DAXFlash(metaclass=LogBase):
         """ XFlash Setup environment command """
         if self.xsend(self.cmd.SETUP_ENVIRONMENT):
             da_log_level = int(self.daconfig.uartloglevel)
-            log_channel = 1
+            if self.daconfig.logchannel == "UART":
+                log_channel = 1
+            elif self.daconfig.logchannel == "USB":
+                log_channel = 2
+            elif self.daconfig.logchannel == "BOTH":
+                log_channel = 3
             system_os = self.ft_system_ose.OS_LINUX
             ufs_provision = 0x0
             param = pack("<IIIII", da_log_level, log_channel, system_os, ufs_provision, 0x0)
@@ -1039,14 +1054,30 @@ class DAXFlash(metaclass=LogBase):
                 if self.set_remote_sec_policy(data=sla_signature):
                     print("SLA Signature was accepted.")
                     return True
-        if rsakey is None:
-            print("No valid sla key found, trying dummy auth ....")
-            # Xiaomi
-            sla_signature = b"\x00" * 0x100
-            if self.set_remote_sec_policy(data=sla_signature):
-                print("SLA Signature was accepted.")
-                return True
-        else:
+        if "motorola" in self.mtk.loader or "lamu" in self.mtk.loader:
+            print("Trying lamu ....")
+            # Motorola G05
+            res = self.get_dev_fw_info()
+            if res != b"":
+                sla_signature = bytes.fromhex(
+                    "65E9F25C9A26488DD7948FFA3511B883963301821AD162376FAAF40FA207E92536F85529AD5A8C54BDAFB650C95B603E5643047EEEC1F83D051E02218B585CEDC2181CBFFDEB8F6E8074CBAB17E39FD3A6F8F5F708F1BBA37816200BBC768F36C80A6A99883FCADE93D577B73C9CBB401C0E62BD5D1654EED9949FF8AB03635B682217EDC59B22517ED6EF45AD2B1CAFC9B9C18C46C138A58EEEFE8301D9CDA659F7B35D43BDE6A64D6095FBD07FA762ADFC02082D3F61CD18A37B6B2D0321C5DE36F8148A1C46F6E651D8E695CAD841A05CB261AF78C9480EA5477211B3D6FD2DC9FC4B367DC21882485092C76C6DF658591C08AA60AF059004B2D11E4E4E0E")
+                if self.set_remote_sec_policy(data=sla_signature):
+                    print("SLA Signature was accepted.")
+                    return True
+                data=bytearray(b"\x42"*0x10)
+                for rsakey in da_sla_keys:
+                    if rsakey.vendor == "Motorola":
+                        sla_signature = generate_da_sla_signature(data=data, key=rsakey.key)
+                        if self.set_remote_sec_policy(data=sla_signature):
+                            print("SLA Signature was accepted.")
+                            return True
+                        else:
+                            data = res[4:4 + 0x10]
+                            sla_signature = generate_da_sla_signature(data=data, key=rsakey.key)
+                            if self.set_remote_sec_policy(data=sla_signature):
+                                print("SLA Signature was accepted.")
+                                return True
+        if rsakey is not None:
             res = self.get_dev_fw_info()
             if res != b"":
                 data = res[4:4 + 0x10]
@@ -1054,6 +1085,13 @@ class DAXFlash(metaclass=LogBase):
                 if self.set_remote_sec_policy(data=sla_signature):
                     print("SLA Signature was accepted.")
                     return True
+        else:
+            print("No valid sla key found, trying dummy auth ....")
+            # Xiaomi
+            sla_signature = b"\x00" * 0x100
+            if self.set_remote_sec_policy(data=sla_signature):
+                print("SLA Signature was accepted.")
+                return True
         return False
 
     def upload_da(self):
@@ -1139,6 +1177,7 @@ class DAXFlash(metaclass=LogBase):
                     else:
                         daextdata = None
                     if daextdata is not None:
+                        self.info("Starting DA extensions ...")
                         self.daext = False
                         if self.boot_to(addr=self.extensions_address, da=daextdata):
                             ret = self.send_devctrl(XCmd.CUSTOM_ACK)

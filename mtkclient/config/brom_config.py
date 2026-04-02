@@ -322,6 +322,20 @@ class Efuse:
                 base + 0x10C, base + 0x110, base + 0x114, base + 0x118, base + 0x11C,
                 0xF00000, 0xF00000, 0xF00000
             ]
+        elif hwcode in [0x992]:
+            self.efuses = [
+                base + 0x20, base + 0x38, base + 0x30, base + 0x40, base + 0x44,
+                base + 0x48, base + 0x4C, base + 0x50, 0x8000000, 0x8000000,
+                0xA, 0x8000008, base + 0x140, base + 0x144, base + 0x148,
+                base + 0x14C, base + 0x7A0, base + 0x7A4, base + 0x7A8, base + 0x7AC,
+                0x8000000, base + 0x7B0, base + 0x7B4, base + 0x7B8, base + 0x7BC,
+                base + 0x7C0, base + 0x7C4, base + 0x7C8, base + 0x7CC, 0x1D,
+                0x1E, base + 0x60, base + 0x130, 0x8000000, base + 0x120,
+                base + 0x260, base + 0x264, base + 0x268, base + 0x664, base + 0x668,
+                0x8000000, 0x8000000, 0x8000000, 0x8000000, 0x8000000,
+                0x8000000, 0x8000000, 0x8000000, 0x8000000, 0x8000000,
+                0x8000000, 0x8000000, base + 0x580
+            ]
         else:
             self.efuses = []
 
@@ -337,6 +351,8 @@ class Chipconfig:
     ap_dma_mem = None
     sej_base = None
     dxcc_base = None
+    ssr_base = None
+    ssr_clk_base = None
     name = ""
     description = ""
     dacode = None
@@ -356,14 +372,17 @@ class Chipconfig:
     misc_lock = None
     efuse_addr = None
     has64bit = False
+    iot = False
 
     def __init__(self, var1=None, watchdog=None, uart=None, brom_payload_addr=None,
-                 da_payload_addr=None, pl_payload_addr=None, cqdma_base=None, sej_base=None, dxcc_base=None,
+                 da_payload_addr=None, pl_payload_addr=None, cqdma_base=None, sej_base=None,
+                 dxcc_base=None, ssr_base = None, ssr_clk_base = None,
                  gcpu_base=None, ap_dma_mem=None, name="", description="", dacode=None,
                  meid_addr=None, socid_addr=None, blacklist=(), blacklist_count=None,
                  send_ptr=None, ctrl_buffer=(), cmd_handler=None, brom_register_access=None,
                  damode=DAmodes.LEGACY, loader=None, prov_addr=None, misc_lock=None,
-                 efuse_addr=None, has64bit=False):
+                 efuse_addr=None, has64bit=False, iot=False):
+        self.iot = iot
         self.var1 = var1
         self.watchdog = watchdog
         self.uart = uart
@@ -374,6 +393,8 @@ class Chipconfig:
         self.ap_dma_mem = ap_dma_mem
         self.sej_base = sej_base
         self.dxcc_base = dxcc_base
+        self.ssr_clk_base = ssr_clk_base
+        self.ssr_base = ssr_base
         self.name = name
         self.description = description
         self.dacode = dacode
@@ -482,19 +503,44 @@ hwconfig = {
         dacode=0x0598,
         name="ELBRUS/MT0598"),
     0x992: Chipconfig(  # var1
+        # T-Mobile / Quanta D53 5G mobile hotspot (MT6890) / Dell DW5931e / Fibocom FM350-GL WWAN card (MT6880)
         watchdog=0x10007000,
-        # uart
-        # brom_payload_addr
-        # da_payload_addr
-        # gcpu_base
-        # sej_base
+        uart=0x11003000,
+        brom_payload_addr=0x100A00,
+        da_payload_addr=0x201000,
+        gcpu_base=0x10360000,
+        sej_base=0x1000A000,
         # cqdma_base
         # ap_dma_mem
         # blacklist
         efuse_addr=0x11EC0000,
         damode=DAmodes.XFLASH,
         dacode=0x0992,
-        name="MT6880/MT6890"),
+        name="MT6880/MT6890 Modem"),
+    0x2601: Chipconfig(
+        var1=0xA,  # Smartwatch, confirmed
+        watchdog=0x10007000,
+        uart=0x11005000,
+        brom_payload_addr=0x100A00,
+        da_payload_addr=0x2008000,
+        pl_payload_addr=0x81E00000,  #
+        # no gcpu_base =0x10210000,
+        sej_base=0x1000A000,  # hacc
+        # no dxcc
+        # no cqdma_base
+        # no ap_dma_mem
+        blacklist=[(0x11141F0C, 0x0), (0x11144BC4, 0x0)],
+        blacklist_count=0x00000008,
+        send_ptr=(0x11141f4c, 0xba68),
+        ctrl_buffer=0x11142BE0,
+        cmd_handler=0x0040C5AF,
+        brom_register_access=(0x40bd48, 0x40befc),
+        meid_addr=0x11142C34,
+        dacode=0x2601,
+        damode=DAmodes.LEGACY,  #
+        name="MT2601",
+        iot=True,
+        loader="mt2601_payload.bin"),
     0x2523: Chipconfig(
         var1=0xA,  # Smartwatch, confirmed
         watchdog=0x10007000,
@@ -516,6 +562,7 @@ hwconfig = {
         meid_addr=0x11142C34,
         dacode=0x2523,
         damode=DAmodes.LEGACY,  #
+        iot=True,
         name="MT2523",
         # loader="mt2601_payload.bin"
     ),
@@ -540,32 +587,10 @@ hwconfig = {
         # meid_addr=0x11142C34,
         dacode=0x2625,
         damode=DAmodes.LEGACY,  #
+        iot=True,
         name="MT2625",
         # loader="mt2601_payload.bin"
     ),
-    0x2601: Chipconfig(
-        var1=0xA,  # Smartwatch, confirmed
-        watchdog=0x10007000,
-        uart=0x11005000,
-        brom_payload_addr=0x100A00,
-        da_payload_addr=0x2008000,
-        pl_payload_addr=0x81E00000,  #
-        # no gcpu_base =0x10210000,
-        sej_base=0x1000A000,  # hacc
-        # no dxcc
-        # no cqdma_base
-        # no ap_dma_mem
-        blacklist=[(0x11141F0C, 0x0), (0x11144BC4, 0x0)],
-        blacklist_count=0x00000008,
-        send_ptr=(0x11141f4c, 0xba68),
-        ctrl_buffer=0x11142BE0,
-        cmd_handler=0x0040C5AF,
-        brom_register_access=(0x40bd48, 0x40befc),
-        meid_addr=0x11142C34,
-        dacode=0x2601,
-        damode=DAmodes.LEGACY,  #
-        name="MT2601",
-        loader="mt2601_payload.bin"),
     0x3967: Chipconfig(  # var1
         # watchdog
         # uart
@@ -581,6 +606,129 @@ hwconfig = {
         dacode=0x3967,
         damode=DAmodes.LEGACY,
         name="MT3967"),
+    0x5932: Chipconfig(  # var1
+        # watchdog
+        # uart
+        brom_payload_addr=0x100A00,
+        da_payload_addr=0x201000,
+        pl_payload_addr=0x40020000,
+        # gcpu_base
+        # sej_base
+        # no dxcc
+        # cqdma_base
+        # ap_dma_mem
+        # blacklist
+        dacode=0x5932,
+        damode=DAmodes.LEGACY,
+        iot=True,
+        name="MT5932"),
+    0x7682: Chipconfig(  # var1
+        # watchdog
+        # uart
+        brom_payload_addr=0x100A00,
+        da_payload_addr=0x201000,
+        pl_payload_addr=0x40020000,
+        # gcpu_base
+        # sej_base
+        # no dxcc
+        # cqdma_base
+        # ap_dma_mem
+        # blacklist
+        dacode=0x7682,
+        damode=DAmodes.LEGACY,
+        iot=True,
+        name="MT7682"),
+    0x7686: Chipconfig(  # var1
+        # watchdog
+        # uart
+        brom_payload_addr=0x100A00,
+        da_payload_addr=0x201000,
+        pl_payload_addr=0x40020000,
+        # gcpu_base
+        # sej_base
+        # no dxcc
+        # cqdma_base
+        # ap_dma_mem
+        # blacklist
+        dacode=0x7686,
+        damode=DAmodes.LEGACY,
+        iot=True,
+        name="MT7686"),
+    0x6225: Chipconfig(  # var1
+        # watchdog
+        # uart
+        # brom_payload_addr
+        # da_payload_addr
+        # gcpu_base
+        sej_base=0x80140000,
+        # no dxcc
+        # cqdma_base
+        # ap_dma_mem
+        # blacklist
+        damode=DAmodes.LEGACY,
+        dacode=0x6225,
+        iot=True,
+        name="MT6225"),
+    0x6226: Chipconfig(  # var1
+        # watchdog
+        # uart
+        # brom_payload_addr
+        # da_payload_addr
+        # gcpu_base
+        sej_base=0x80140000,
+        # no dxcc
+        # cqdma_base
+        # ap_dma_mem
+        # blacklist
+        damode=DAmodes.LEGACY,
+        dacode=0x6226,
+        iot=True,
+        name="MT6226"),
+    0x6236: Chipconfig(  # var1
+        # watchdog
+        # uart
+        # brom_payload_addr
+        # da_payload_addr
+        # gcpu_base
+        # sej_base=0x80140000,
+        # no dxcc
+        # cqdma_base
+        # ap_dma_mem
+        # blacklist
+        damode=DAmodes.LEGACY,
+        dacode=0x6236,
+        iot=True,
+        name="MT6236"),
+    0x6238: Chipconfig(  # var1
+        # watchdog
+        # uart
+        # brom_payload_addr
+        # da_payload_addr
+        # gcpu_base
+        # sej_base=0x80140000,
+        # no dxcc
+        # cqdma_base
+        # ap_dma_mem
+        # blacklist
+        damode=DAmodes.LEGACY,
+        dacode=0x6238,
+        iot=True,
+        name="MT6238"),
+    0x6253: Chipconfig(  # var1
+        # watchdog
+        # uart
+        # brom_payload_addr
+        # da_payload_addr
+        # gcpu_base
+        # sej_base=0x80140000,
+        # no dxcc
+        # cqdma_base
+        # ap_dma_mem
+        # blacklist
+        damode=DAmodes.LEGACY,
+        dacode=0x6253,
+        iot=True,
+        name="MT6253"),
     0x6255: Chipconfig(  # var1
         # watchdog
         # uart
@@ -593,8 +741,39 @@ hwconfig = {
         # ap_dma_mem
         # blacklist
         damode=DAmodes.LEGACY,
-        # dacode
+        dacode=0x6255,
+        iot=True,
         name="MT6255"),
+    0x6256: Chipconfig(  # var1
+        # watchdog
+        # uart
+        # brom_payload_addr
+        # da_payload_addr
+        # gcpu_base
+        # sej_base=0x80140000,
+        # no dxcc
+        # cqdma_base
+        # ap_dma_mem
+        # blacklist
+        damode=DAmodes.LEGACY,
+        dacode=0x6256,
+        iot=True,
+        name="MT6256"),
+    0x625a: Chipconfig(  # var1
+        # watchdog
+        # uart
+        # brom_payload_addr
+        # da_payload_addr
+        # gcpu_base
+        # sej_base=0x80140000,
+        # no dxcc
+        # cqdma_base
+        # ap_dma_mem
+        # blacklist
+        damode=DAmodes.LEGACY,
+        dacode=0x625a,
+        iot=True,
+        name="MT625a"),
     0x6261: Chipconfig(
         var1=0x28,  # Smartwatch, confirmed
         watchdog=0xA0030000,
@@ -611,9 +790,58 @@ hwconfig = {
         ctrl_buffer=0x700041A8,
         cmd_handler=0x700061F6,
         damode=DAmodes.LEGACY,
+        iot=True,
         dacode=0x6261,
-        name="MT6261",
+        name="MT6261/MT2503",
         loader="mt6261_payload.bin"
+    ),
+    0x6268: Chipconfig(  # var1
+        # watchdog
+        # uart
+        # brom_payload_addr
+        # da_payload_addr
+        # gcpu_base
+        # sej_base=0x80080000,
+        # no dxcc
+        # cqdma_base
+        # ap_dma_mem
+        # blacklist
+        iot=True,
+        damode=DAmodes.LEGACY,
+        dacode=0x6268,
+        name="MT6268"
+    ),
+    0x6270: Chipconfig(  # var1
+        # watchdog
+        # uart
+        # brom_payload_addr
+        # da_payload_addr
+        # gcpu_base
+        # sej_base=0x80080000,
+        # no dxcc
+        # cqdma_base
+        # ap_dma_mem
+        # blacklist
+        iot=True,
+        damode=DAmodes.LEGACY,
+        dacode=0x6270,
+        name="MT6270"
+    ),
+    0x6276: Chipconfig(  # var1
+        # watchdog
+        # uart
+        # brom_payload_addr
+        # da_payload_addr
+        # gcpu_base
+        # sej_base=0x80080000,
+        # no dxcc
+        # cqdma_base
+        # ap_dma_mem
+        # blacklist
+        iot=True,
+        damode=DAmodes.LEGACY,
+        dacode=0x6276,
+        name="MT6276"
     ),
     0x6280: Chipconfig(  # var1
         # watchdog
@@ -626,8 +854,25 @@ hwconfig = {
         # cqdma_base
         # ap_dma_mem
         # blacklist
+        iot=True,
         damode=DAmodes.LEGACY,
         name="MT6280"
+    ),
+    0x6291: Chipconfig(  # var1
+        # watchdog
+        # uart
+        # brom_payload_addr
+        # da_payload_addr
+        # gcpu_base
+        # sej_base=0x80080000,
+        # no dxcc
+        # cqdma_base
+        # ap_dma_mem
+        # blacklist
+        iot=True,
+        damode=DAmodes.LEGACY,
+        dacode=0x6291,
+        name="MT6291"
     ),
     0x6516: Chipconfig(  # var1
         watchdog=0x10003000,
@@ -714,6 +959,7 @@ hwconfig = {
     0x6575: Chipconfig(  # var1
         watchdog=0xC0000000,
         uart=0xC1009000,
+        brom_payload_addr=0xf0000a00,
         da_payload_addr=0xc2001000,
         pl_payload_addr=0xc2058000,
         # gcpu_base
@@ -722,9 +968,15 @@ hwconfig = {
         # cqdma_base
         ap_dma_mem=0xC100119C,
         # blacklist
+        send_ptr=(0xf00025fc, 0xffffa0a0),
+        cmd_handler=0xffffad5c,
+        brom_register_access=(0xffffa3aa, 0xffffa4c4),
+        meid_addr=0xf0002af4,
+        efuse_addr=0xc1019000,
         damode=DAmodes.LEGACY,
         dacode=0x6575,
-        name="MT6575/MT6577/MT8317"),
+        name="MT6575/MT8317",
+        loader="mt6575_payload.bin"),
     0x6577: Chipconfig(  # var1
         watchdog=0xC0000000,
         uart=0xC1009000,
@@ -802,7 +1054,7 @@ hwconfig = {
         ap_dma_mem=0x11000000 + 0x320,  # AP_DMA_I2C_0_RX_MEM_ADDR
         misc_lock=0x10002050,
         damode=DAmodes.LEGACY,
-        dacode=0x6589,
+        dacode=0x6583,
         name="MT6583/6589"),
     0x6592: Chipconfig(
         var1=0xA,  # confirmed
@@ -1125,7 +1377,7 @@ hwconfig = {
         efuse_addr=0x11c50000,
         damode=DAmodes.XFLASH,
         dacode=0x6761,
-        name="MT6761/MT6762/MT3369/MT8766B",
+        name="MT6761/MT6762/MT3369/MT8766B/MT8761/AC8259/AC8257",
         description="Helio A20/P22/A22/A25/G25",
         loader="mt6761_payload.bin"),
     0x690: Chipconfig(
@@ -1642,8 +1894,8 @@ hwconfig = {
         da_payload_addr=0x201000,
         pl_payload_addr=0x40200000,
         gcpu_base=0x10050000,
-        dxcc_base=0x10210000,
-        sej_base=0x1000a000,
+        dxcc_base=0x1C807000,
+        sej_base=0x1C009000,
         cqdma_base=0x10212000,
         ap_dma_mem=0x11300800 + 0x1a0,
         # blacklist=[(0x102848, 0x0), (0x00106B60, 0x0)],
@@ -1663,6 +1915,7 @@ hwconfig = {
         # loader="mt6893_payload.bin"
     ),
     0x1203: Chipconfig(
+        # new crypto hw, Xiaomi 14T (degas) / Redmi K70E / Poco X6 Pro 5G (duchamp)
         var1=0xA,
         watchdog=0x1c007000,
         uart=0x11002000,
@@ -1670,7 +1923,8 @@ hwconfig = {
         da_payload_addr=0x201000,
         pl_payload_addr=0x40200000,
         gcpu_base=0x1000D000,
-        dxcc_base=0x10403000,
+        ssr_base=0x10400000,
+        ssr_clk_base=0x10400000,
         sej_base=0x1040E000,
         # cqdma_base=0x10212000,
         # ap_dma_mem=0x11300800 + 0x1a0,
@@ -1776,6 +2030,37 @@ hwconfig = {
         description="Dimensity 7200 Ultra"
         # loader="mt7200_payload.bin"
     ),
+    0x1236: Chipconfig(
+        # new crypto hw, Xiaomi 14T Pro
+        # var1=0xA,
+        watchdog=0x1C00B000,
+        # uart=0x11002000,
+        brom_payload_addr=0x100A00,
+        da_payload_addr=0x2001000,
+        pl_payload_addr=0x40200000,
+        # gcpu_base=0x1000D000,
+        ssr_base=0x10400000,
+        ssr_clk_base=0x10400000,
+        sej_base=0x1040E000,
+        # cqdma_base=0x10212000,
+        # ap_dma_mem=0x11300800 + 0x1a0,
+        # blacklist=[(0x102d5c, 0x0)],
+        # blacklist_count=0x0000000A,
+        # send_ptr=(0x102888, 0xE79C),
+        # ctrl_buffer=0x00103024,
+        # cmd_handler=0x000101E8,
+        # brom_register_access=(0xf99a, 0xfa0c),
+        meid_addr=0x1008EC,
+        socid_addr=0x100934,
+        # prov_addr=0x1066C0,
+        efuse_addr=0x11F10000,
+        damode=DAmodes.XML,
+        dacode=0x1236,
+        has64bit=True,
+        name="MT6989W",
+        description="Dimensity 9300 Plus"
+        # loader="mt9300_payload.bin"
+    ),
     0x1296: Chipconfig(
         var1=0xA,
         watchdog=0x1C007000,
@@ -1806,14 +2091,16 @@ hwconfig = {
         # loader="mt6985_payload.bin"
     ),
     0x1375: Chipconfig(
+        # new hw crypto Xiaomi Redmi Note 14 Pro
         var1=0xA,
         watchdog=0x1C00A000,
-        # uart=0x1C011000,
+        uart=0x11001000,
         brom_payload_addr=0x100A00,
         da_payload_addr=0x2010000,
         pl_payload_addr=0x40200000,
         # gcpu_base=0x10050000,
-        dxcc_base=0x10400000,
+        ssr_base=0x10400000,
+        ssr_clk_base=0x10400000,
         sej_base=0x1040E000,
         # cqdma_base=0x10212000,
         # ap_dma_mem=0x11300800 + 0x1a0,
@@ -1834,7 +2121,67 @@ hwconfig = {
         description="Dimensity 7300"
         # loader="mt6878_payload.bin"
     ),
+    0x6899: Chipconfig(
+        # new crypto hw, Xiaomi 15T
+        var1=0xA,
+        watchdog=0x1C010000,
+        uart=0x16010000,
+        brom_payload_addr=0x100A00,
+        da_payload_addr=0x201000,
+        pl_payload_addr=0x40200000,
+        # gcpu_base=0x10050000,
+        ssr_base=0x10400000,
+        ssr_clk_base=0x10000000,
+        sej_base=0x1040E000,
+        # cqdma_base=0x10212000,
+        # ap_dma_mem=0x11300800 + 0x1a0,
+        # blacklist=[(0x102d5c, 0x0)],
+        # blacklist_count=0x0000000A,
+        # send_ptr=(0x102888, 0xE79C),
+        # ctrl_buffer=0x00103024,
+        # cmd_handler=0x000101E8,
+        # brom_register_access=(0xf99a, 0xfa0c),
+        # meid_addr=0x1008EC,
+        # socid_addr=0x100934,
+        # prov_addr=0x1066C0,
+        efuse_addr=0x13260000,
+        damode=DAmodes.XML,
+        dacode=0x1357,
+        has64bit=True,
+        name="MT6899",
+        description="Dimensity 8400 Turbo/Ultra"
+        # loader="mt6899_payload.bin"
+    ),
+    0x1357: Chipconfig(
+        # Mediatek Dimensity 9400 (MT6991) Samsung Galaxy Tab S11 Ultra SM-X930, Xiaomi Mi 15T Pro
+        var1=0xA,
+        watchdog=0x1c010000,
+        uart=0x16000000,
+        brom_payload_addr=0x100A00,
+        da_payload_addr=0x201000,
+        pl_payload_addr=0x40200000,
+        # gcpu_base=0x1000D000,
+        ssr_base=0x18003000,
+        ssr_clk_base=0x18000000,
+        sej_base=0x1800E000,
+        # cqdma_base=0x10212000,
+        # ap_dma_mem=0x11300800 + 0x1a0,
+        # blacklist=[(0x102848, 0x0), (0x00106B60, 0x0)],
+        # blacklist_count=0x0000000A,
+        # send_ptr=(0x102888, 0xE79C),
+        # ctrl_buffer=0x00102A9C,
+        # cmd_handler=0x0000F569,
+        # brom_register_access=(0xeba4, 0xec5c),
+        # meid_addr=0x1008EC,
+        # socid_addr=0x20E7090,
+        # prov_addr=0x1066C0,
+        damode=DAmodes.XML,
+        dacode=0x1357,
+        name="MT6991",
+        description="Dimensity 9400 Ultra"
+    ),
     0x1471: Chipconfig(
+        # new crypto hw Poco X8 Pro Max
         var1=0xA,
         watchdog=0x1c010000,
         uart=0x16010000,
@@ -1842,7 +2189,8 @@ hwconfig = {
         da_payload_addr=0x201000,
         pl_payload_addr=0x40200000,
         # gcpu_base=0x10050000,
-        dxcc_base=0x18005000,
+        ssr_base=0x18003000,
+        ssr_clk_base=0x18000000,
         sej_base=0x1800E000,
         # cqdma_base=0x10212000,
         # ap_dma_mem=0x11300800 + 0x1a0,
@@ -1884,7 +2232,8 @@ hwconfig = {
         misc_lock=0x10002050,
         damode=DAmodes.LEGACY,  #
         dacode=0x8127,
-        name="MT8127/MT3367",
+        name="MT8127/MT3367/AC8227L",
+        description="",
         loader="mt8127_payload.bin"),  # ford,austin,tank #mhmm wdt, nochmal checken
     0x8135: Chipconfig(  # var1
         watchdog=0x10000000,

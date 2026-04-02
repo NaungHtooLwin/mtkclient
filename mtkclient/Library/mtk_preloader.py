@@ -139,7 +139,7 @@ class Preloader(metaclass=LogBase):
         self.echo = self.mtk.port.echo
         self.sendcmd = self.mtk.port.mtk_cmd
 
-    def init(self, maxtries=None, display=True, directory: str = None):
+    def init(self, display=True, directory: str = None):
         if directory:
             self.mtk.config.hwparam_path = directory
         if os.path.exists(os.path.join(self.mtk.config.hwparam_path, ".state")):
@@ -171,22 +171,23 @@ class Preloader(metaclass=LogBase):
         if tries == 1000:
             return False
 
-        if self.config.iot:
+        if not self.echo(self.Cmd.GET_HW_CODE.value):  # 0xFD
+            if not self.echo(self.Cmd.GET_HW_CODE.value):
+                self.error("Sync error. Please power off the device and retry.")
+                self.config.set_gui_status(self.config.tr("Sync error. Please power off the device and retry."))
+            return False
+        val = self.rdword()
+        if val is None or self.config.iot:
             self.config.hwver = self.read_a2(0x80000000)
             self.config.hwcode = self.read_a2(0x80000008)
             self.config.hw_sub_code = self.read_a2(0x8000000C)
             self.config.swver = (self.read32(0xA01C0108) & 0xFFFF0000) >> 16
+            self.config.iot = True
+            self.info("Detected iot mode !")
         else:
-            if not self.echo(self.Cmd.GET_HW_CODE.value):  # 0xFD
-                if not self.echo(self.Cmd.GET_HW_CODE.value):
-                    self.error("Sync error. Please power off the device and retry.")
-                    self.config.set_gui_status(self.config.tr("Sync error. Please power off the device and retry."))
-                return False
-            else:
-                val = self.rdword()
-                self.config.hwcode = (val >> 16) & 0xFFFF
-                self.config.hwver = val & 0xFFFF
-                self.config.init_hwcode(self.config.hwcode)
+            self.config.hwcode = (val >> 16) & 0xFFFF
+            self.config.hwver = val & 0xFFFF
+            self.info("Detected regular mode !")
         self.config.init_hwcode(self.config.hwcode)
 
         cpu = self.config.chipconfig.name
@@ -202,7 +203,7 @@ class Preloader(metaclass=LogBase):
                 self.info("\tCQ_DMA addr:\t\t" + hex(self.config.chipconfig.cqdma_base))
             self.info("\tVar1:\t\t\t" + hex(self.config.chipconfig.var1))
 
-        if not skipwdt:
+        if not skipwdt and not self.config.chipconfig.has64bit:
             if self.display:
                 self.info("Disabling Watchdog...")
             self.setreg_disablewatchdogtimer(self.config.hwcode, self.config.hwver)  # D4
@@ -213,6 +214,10 @@ class Preloader(metaclass=LogBase):
         self.get_blver()
         self.get_bromver()
         meid = None
+        if self.config.chipconfig.iot:
+            self.config.iot = True
+        if self.config.hwcode in [0x6261]:
+            self.config.iot = True
         if not self.config.iot:
             res = self.get_hw_sw_ver()
             self.config.hw_sub_code = 0
@@ -237,7 +242,7 @@ class Preloader(metaclass=LogBase):
             self.config.set_meid(meid)
             if self.display:
                 self.info("ME_ID:\t\t\t" + hexlify(meid).decode('utf-8').upper())
-            if readsocid or self.config.chipconfig.socid_addr:
+            if readsocid or self.config.chipconfig.socid_addr or self.config.chipconfig.has64bit:
                 socid = self.get_socid()
                 if len(socid) >= 16:
                     self.config.set_socid(socid)
@@ -271,7 +276,10 @@ class Preloader(metaclass=LogBase):
                 MR_FB0RB1 = 2  # Flash - Bank0, RAM - Bank1
                 MR_FB1RB0 = 3  # Flash - Bank1, RAM - Bank0
                 if self.config.swver == 0x35C0 and self.config.hw_sub_code == 0x8000:
-                    self.info("MTK 6261MA detected :)")
+                    if self.config.hwver == 0xcb01:
+                        self.info("MTK 6261DA detected :)")
+                    else:
+                        self.info("MTK 6261MA detected :)")
                     sys.stdout.flush()
                     self.write16(RGU_BASE, 0x2200)  # disable system wdg
                     self.write16(PMU_BASE + 0xa28, 0x8000)  # enter USB download
@@ -329,28 +337,41 @@ class Preloader(metaclass=LogBase):
                     self.write32(EMI_REMAP,
                                  self.read32(
                                      EMI_REMAP) | MR_FB0RB1)  # Set MB0 to Bank0 and MB1 to Bank1, map rom to ram
-
-            if self.config.internal_flash:
-                self.dump_internal_flash()
-
         if self.config.target_config["sla"] and self.config.chipconfig.damode == DAmodes.XML:
             self.handle_sla(func=None, isbrom=self.config.is_brom)
         return True
 
-    def dump_internal_flash(self):
+    def dump_internal_flash(self, offset: int = 0, length: int = 0, step: int = 0,
+                            filename: str = "internal_flash.bin"):
         flash = bytearray()
-        pg = progress(pagesize=1, total=self.mtk.length, prefix="Dumping internal flash..", offset=self.mtk.offset)
-        with open("internal_flash.bin", "wb") as wf:
-            for pos in range(self.mtk.offset, self.mtk.length, self.mtk.step):
-                data = b"".join([int.to_bytes(x, 4, 'little') for x in self.read32(pos, dwords=self.mtk.step // 4)])
-                if data == b"":
-                    data = b"\x00" * self.mtk.step
-                wf.write(data)
-                pg.update(len(data))
-                flash.extend(data)
-            pg.done()
-        print("Done reading internal flash to \"internal_flash.bin\"")
+        pg = progress(pagesize=1, total=length, prefix="Dumping internal flash..", offset=offset)
+        try:
+            pos = offset
+            bytestoread = length
+            while bytestoread > 0:
+                tmp = self.read(addr=pos, dwords=step // 4, length=32, direct=True)
+                rlen = len(tmp)
+                if rlen == 0:
+                    break
+                flash.extend(tmp)
+                pg.update(rlen)
+                pos += rlen
+                bytestoread -= rlen
+        except Exception:
+            flash=b"".join([int.from_bytes(flash[pos:pos+4],"big").to_bytes(4,"little")
+                            for pos in range(0,len(flash),4)])
+            return flash
+        pg.done()
+        if len(flash) > 0 and filename != "":
+            with open("internal_flash.bin", "wb") as wf:
+                wf.write(flash)
+                print("Done reading internal flash to \"internal_flash.bin\"")
+        elif len(flash) > 0:
+            flash = b"".join(
+                [int.from_bytes(flash[pos:pos + 4], "big").to_bytes(4, "little") for pos in range(0, len(flash), 4)])
+            return flash
         sys.stdout.flush()
+        return b""
 
     def read_a2(self, addr, dwords=1) -> list:
         cmd = self.Cmd.CMD_READ16_A2
@@ -361,7 +382,7 @@ class Preloader(metaclass=LogBase):
                 return unpack(">H", self.usbread(2))[0]
         return []
 
-    def read(self, addr, dwords=1, length=32) -> list:
+    def read(self, addr, dwords=1, length=32, direct: bool = False) -> list:
         result = []
         cmd = self.Cmd.READ16 if length == 16 else self.Cmd.READ32
         if self.echo(cmd.value):
@@ -370,7 +391,7 @@ class Preloader(metaclass=LogBase):
                 status = self.rword()
                 if ack and status <= 0xFF:
                     if length == 32:
-                        result = self.rdword(dwords)
+                        result = self.rdword(dwords, direct=direct)
                     else:
                         result = self.rword(dwords)
                     status2 = unpack(">H", self.usbread(2))[0]
@@ -382,6 +403,9 @@ class Preloader(metaclass=LogBase):
 
     def read32(self, addr, dwords=1) -> (list, int):
         return self.read(addr, dwords, 32)
+
+    def read32_direct(self, addr, dwords=1) -> (list, int):
+        return self.read(addr, dwords, 32, direct=True)
 
     def read16(self, addr, dwords=1) -> (list, int):
         return self.read(addr, dwords, 16)
@@ -602,7 +626,6 @@ class Preloader(metaclass=LogBase):
                 # BootEngine
                 # set external boot , remap control change to Bus
                 # Set MB0 to Bank0 and MB1 to Bank1
-                self.write32(0xA0510000, self.read32(0xA0510000, 1) | 2)
                 self.write32(0xA0510000, self.read32(0xA0510000, 1) | 2)
             else:
                 self.write16(0xA0030000, 0x2200)

@@ -304,13 +304,12 @@ class UsbClass(DeviceClass):
         self.EP_IN = None
         devices = usb.core.find(find_all=True, bDeviceClass=devclass, backend=self.backend)
         for dev in list(filter(lambda x: x.idVendor in [0x0E8D, 0x1004, 0x22d9, 0x0FCE], devices)):
-            if dev.idVendor in self.portconfig:
-                if dev.idProduct in self.portconfig[dev.idVendor]:
-                    self.device = dev
-                    self.vid = dev.idVendor
-                    self.pid = dev.idProduct
-                    self.interface = self.portconfig[dev.idVendor][dev.idProduct]
-                    break
+            if dev.idVendor in self.portconfig and dev.idProduct in self.portconfig[dev.idVendor]:
+                self.device = dev
+                self.vid = dev.idVendor
+                self.pid = dev.idProduct
+                self.interface = self.portconfig[dev.idVendor][dev.idProduct]
+                break
         if self.device is None:
             self.debug("Couldn't detect the device. Is it connected ?")
             return False
@@ -432,9 +431,6 @@ class UsbClass(DeviceClass):
                         pos += ctr
                 except Exception as err:
                     self.debug(str(err))
-                    if 'No such device' in str(err):
-                        self.error(str(err))
-                        sys.exit(1)
                     # print("Error while writing")
                     # time.sleep(0.01)
                     i += 1
@@ -464,7 +460,9 @@ class UsbClass(DeviceClass):
         return self.EP_OUT.wMaxPacketSize
 
     def usbread(self, resplen=None, maxtimeout=100, w_max_packet_size=None):
+        endearly = False
         if resplen is None:
+            endearly = True
             resplen = self.maxsize
         if resplen <= 0:
             self.info("Warning !")
@@ -508,6 +506,8 @@ class UsbClass(DeviceClass):
                     dt = epr(sz)
                     rlen = len(dt)
                     extend(dt)
+                    if endearly and rlen!=0:
+                        break
                     if rlen < sz and maxtimeout == -1:
                         break
             except usb.core.USBError as e:

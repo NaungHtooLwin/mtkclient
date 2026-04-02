@@ -37,7 +37,7 @@ class MtkConfig(metaclass=LogBase):
         self.payloadfile = None
         self.loader = None
         self.iot = False
-        self.internal_flash = True
+        self.internal_flash = False
         self.gpt_file = None
         self.tr = QObject().tr
         self.ptype = "kamakiri2"
@@ -78,6 +78,8 @@ class MtkConfig(metaclass=LogBase):
             self.__logger.setLevel(logging.INFO)
         self.reconnect = True
         self.uartloglevel = 2
+        self.logchannel = "UART"
+        self.uartlog = []
         self.hwver = 0xca00
         self.swver = 0
 
@@ -166,6 +168,8 @@ class MtkConfig(metaclass=LogBase):
             self.chipconfig.brom_payload_addr = 0x100A00
         if self.chipconfig.da_payload_addr is None:
             self.chipconfig.da_payload_addr = 0x200000
+        if self.chipconfig.iot is None:
+            self.chipconfig.iot = False
         if self.chipconfig.cqdma_base is None:
             self.chipconfig.cqdma_base = None
         if self.chipconfig.gcpu_base is None:
@@ -210,6 +214,8 @@ class MtkConfig(metaclass=LogBase):
                 return [wdt, 0x2264]
             elif wdt == 0xA0030000:
                 return [wdt, 0x2200]
+            elif wdt == 0x1C00A000:
+                return [wdt, 0x22000064]
             elif wdt == 0x2200:
                 if self.hwcode == 0x6276 or self.hwcode == 0x8163:
                     return [wdt, 0x610C0000]

@@ -108,12 +108,17 @@ class DaHandler(metaclass=LogBase):
             self.error(str(err))
             return None
 
-    def configure_da(self, mtk, directory: str = None):
+    def connect(self, mtk, directory:str = None):
         if directory is None:
             directory = "."
         mtk.port.cdc.connected = mtk.port.cdc.connect()
         if mtk.port.cdc.connected is None or not mtk.port.cdc.connected or mtk.serialportname is not None:
             mtk.preloader.init(directory=directory)
+            if self.config.internal_flash and self.mtk.config.iot:
+                offset = self.mtk.offset
+                length = self.mtk.length
+                step = self.mtk.step
+                mtk.preloader.dump_internal_flash(offset=offset,length=length,step=step,filename="internal_flash.bin")
         else:
             if mtk.serialportname is not None:
                 mtk.preloader.init()
@@ -121,9 +126,17 @@ class DaHandler(metaclass=LogBase):
                 self.mtk.config.hwparam_path = directory
             if mtk.port.cdc.connected and os.path.exists(os.path.join(mtk.config.hwparam_path, ".state")):
                 mtk.daloader.reinit()
+                mtk.reinited = True
                 return mtk
         if mtk.config.target_config is None:
             self.info("Please disconnect, start mtkclient and reconnect.")
+            return None
+        return mtk
+
+    def configure_da(self, mtk):
+        if mtk.reinited:
+            return mtk
+        if mtk is None:
             return None
         if mtk.config.target_config["sbc"] and not mtk.config.is_brom and mtk.config.loader is None:
             mtk = mtk.bypass_security()
@@ -195,7 +208,7 @@ class DaHandler(metaclass=LogBase):
             sys.exit(1)
         else:
             mtk.daloader.writestate()
-            return mtk
+        return mtk
 
     def patch_vbmeta(self, vbmeta: bytes, vbmode: int):
         vbmeta = bytearray(vbmeta)
@@ -221,7 +234,7 @@ class DaHandler(metaclass=LogBase):
         partition = "vbmeta" + slot
         rpartition = None
         for gptentry in gpttable:
-            if gptentry.name.lower() == partition.lower():
+            if hasattr(gptentry,"name") and gptentry.name.lower() == partition.lower():
                 rpartition = gptentry
                 break
         if rpartition is not None:
@@ -272,7 +285,7 @@ class DaHandler(metaclass=LogBase):
         rpartition = None
         gpttable = self.mtk.daloader.get_partition_data(parttype=parttype)
         for gptentry in gpttable:
-            if gptentry.name.lower() == partitionname.lower():
+            if hasattr(gptentry,"name") and gptentry.name.lower() == partitionname.lower():
                 rpartition = gptentry
                 break
         if rpartition is not None:
@@ -288,7 +301,7 @@ class DaHandler(metaclass=LogBase):
         rpartition = None
         gpttable = self.mtk.daloader.get_partition_data(parttype=parttype)
         for gptentry in gpttable:
-            if gptentry.name.lower() == partitionname.lower():
+            if hasattr(gptentry,"name") and gptentry.name.lower() == partitionname.lower():
                 rpartition = gptentry
                 break
         if rpartition is not None:
@@ -329,7 +342,7 @@ class DaHandler(metaclass=LogBase):
                 else:
                     rpartition = None
                     for gptentry in gpttable:
-                        if gptentry.name.lower() == partition.lower():
+                        if hasattr(gptentry,"name") and gptentry.name.lower() == partition.lower():
                             rpartition = gptentry
                             break
                     if rpartition is not None:
