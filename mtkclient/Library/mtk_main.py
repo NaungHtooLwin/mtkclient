@@ -113,7 +113,7 @@ class ArgHandler(metaclass=LogBase):
         except AttributeError:
             pass
         try:
-            if args.preloader is not None:
+            if args.var1 is not None:
                 config.chipconfig.var1 = getint(args.var1)
                 self.info("O:Var1:\t\t" + hex(config.chipconfig.var1))
         except AttributeError:
@@ -729,6 +729,11 @@ class Main(metaclass=LogBase):
             try:
                 if self.args.step is not None:
                     mtk.step = int(self.args.step, 16)
+            except Exception:
+                pass
+            try:
+                if self.args.iot is not None:
+                    mtk.config.iot = self.args.iot
             except Exception:
                 pass
             mtk = da_handler.connect(mtk, directory)
